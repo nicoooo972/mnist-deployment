@@ -67,7 +67,16 @@ deploy-prod: ## Déploiement production
 	./scripts/deploy.sh production
 
 # Alias pour compatibilité
-dev: deploy-dev ## Alias pour deploy-dev
+dev: ## Mode développement avec builds locaux
+
+dev-down: ## Arrête les services de développement
+	@echo "$(YELLOW)🛑 Arrêt des services dev...$(RESET)"
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+	@echo "$(BLUE)🔧 Mode développement...$(RESET)"
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	@echo "$(GREEN)✅ Services dev démarrés!$(RESET)"
+	@echo "Frontend: http://localhost:8501"
+	@echo "Backend API: http://localhost:8000"
 staging: deploy-staging ## Alias pour deploy-staging  
 prod: deploy-prod ## Alias pour deploy-prod
 

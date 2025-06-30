@@ -1,0 +1,22 @@
+# Override pour le développement local avec builds
+services:
+  mnist-backend:
+    build:
+      context: ../mnist-backend
+      dockerfile: Dockerfile
+    volumes:
+      - ../mnist-backend/models:/app/models:ro
+      - ../mnist-backend/src:/app/src:ro
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=debug
+
+  mnist-frontend:
+    build:
+      context: ../mnist-frontend  
+      dockerfile: Dockerfile
+    volumes:
+      - ../mnist-frontend/app.py:/app/app.py:ro
+    environment:
+      - STREAMLIT_SERVER_HEADLESS=false
+      - STREAMLIT_LOGGER_LEVEL=debug

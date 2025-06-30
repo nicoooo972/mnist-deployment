@@ -116,8 +116,8 @@ jobs:
       run: |
         echo "🔄 Updating compose file for ${{ env.DEPLOY_ENV }}..."
         # Ici tu peux modifier le docker-compose.yml pour utiliser les bonnes images
-        sed -i "s|context: ../mnist-backend|image: ${{ env.REGISTRY }}/mnist-backend:${{ env.BACKEND_TAG }}|g" docker-compose.yml
-        sed -i "s|context: ../mnist-frontend|image: ${{ env.REGISTRY }}/mnist-frontend:${{ env.FRONTEND_TAG }}|g" docker-compose.yml
+        echo "BACKEND_IMAGE=${{ env.REGISTRY }}/nicoooo972/mnist-backend:${{ env.BACKEND_TAG }}"" >> .env
+        echo "FRONTEND_IMAGE=${{ env.REGISTRY }}/nicoooo972/mnist-frontend:${{ env.FRONTEND_TAG }}" >> .env
         
     - name: Deploy to staging
       if: env.DEPLOY_ENV == 'staging'
