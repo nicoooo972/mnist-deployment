@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  mnist-backend:
+    build:
+      context: ../mnist-backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ../mnist-backend/models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"\]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  mnist-frontend:
+    build:
+      context: ../mnist-frontend  
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://mnist-backend:8000
+    depends_on:
+      mnist-backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    name: mnist-network
