@@ -1,0 +1,77 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  external_labels:
+    environment: 'production'
+    cluster: 'mnist-prod'
+
+rule_files:
+  - "alert_rules.yml"
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+    scrape_interval: 15s
+
+  # MNIST Backend API
+  - job_name: "mnist-backend"
+    static_configs:
+      - targets: ["mnist-backend:8000"]
+    metrics_path: /metrics
+    scrape_interval: 5s
+    scrape_timeout: 3s
+    honor_labels: true
+    params:
+      format: ['prometheus']
+
+  # MNIST Frontend
+  - job_name: "mnist-frontend"
+    static_configs:
+      - targets: ["mnist-frontend:8501"]
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 5s
+
+  # Nginx reverse proxy metrics
+  - job_name: "nginx"
+    static_configs:
+      - targets: ["nginx:9113"]
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  # Docker container metrics
+  - job_name: "docker"
+    static_configs:
+      - targets: ["host.docker.internal:9323"]
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Node/System metrics
+  - job_name: "node-exporter"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+    scrape_interval: 10s
+
+  # Grafana metrics
+  - job_name: "grafana"
+    static_configs:
+      - targets: ["grafana:3000"]
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # cAdvisor for container metrics
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["cadvisor:8080"]
+    scrape_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - "alertmanager:9093"
+      scheme: http
+      timeout: 10s
+      api_version: v1 

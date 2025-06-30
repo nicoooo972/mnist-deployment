@@ -1,21 +1,59 @@
-# Docker
-.env
-docker-compose.override.yml
-
 # Logs
-*.log
 logs/
+*.log
+
+# Backups
+backups/
+
+# Environment files
+.env.local
+.env.production
+
+# Docker
+.docker/
+
+# Monitoring data
+prometheus-data/
+grafana-data/
+
+# Temporary files
+tmp/
+temp/
+
+# Scripts temp files
+/tmp/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# OS
-.DS_Store
-Thumbs.db
+# SSL certificates (if any)
+ssl/
+certs/
+*.pem
+*.key
+*.crt
 
-# Temporary files
-*.tmp
-*.temp 
+# Test results
+test-results/
+coverage/
+
+# Node modules (if any)
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class 

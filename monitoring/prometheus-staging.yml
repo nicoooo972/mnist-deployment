@@ -1,0 +1,48 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Monitor MNIST Backend
+  - job_name: "mnist-backend"
+    static_configs:
+      - targets: ["mnist-backend:8000"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # Monitor MNIST Frontend (if metrics available)
+  - job_name: "mnist-frontend"
+    static_configs:
+      - targets: ["mnist-frontend:8501"]
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 5s
+
+  # Monitor Docker containers
+  - job_name: "docker"
+    static_configs:
+      - targets: ["host.docker.internal:9323"]
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Monitor Node Exporter (if available)
+  - job_name: "node"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+    scrape_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093 

@@ -1,30 +1,107 @@
-.PHONY: help build up down dev logs clean test
+.PHONY: help build up down logs test status clean rebuild dev staging prod deploy-dev deploy-staging deploy-prod
 
-help: ## Afficher l'aide
-	@echo "🐳 MNIST Deployment - Commandes disponibles :"
-	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+# Couleurs pour les messages
+GREEN := \033[0;32m
+RED := \033[0;31m
+YELLOW := \033[1;33m
+BLUE := \033[0;34m
+RESET := \033[0m
 
-build: ## Construire les images Docker
-	docker-compose build
+help: ## Affiche cette aide
+	@echo "$(GREEN)🚀 MNIST Deployment Pipeline$(RESET)"
+	@echo "Commandes disponibles:"
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  $(YELLOW)%-20s$(RESET) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-up: ## Démarrer les services
-	docker-compose up -d
+build: ## Build des images Docker
+	@echo "$(GREEN)🔨 Build des images...$(RESET)"
+	docker compose build
 
-down: ## Arrêter les services
-	docker-compose down
+up: ## Démarre les services (dev)
+	@echo "$(GREEN)🚀 Démarrage des services...$(RESET)"
+	docker compose up -d
+	@echo "$(GREEN)✅ Services démarrés!$(RESET)"
+	@echo "Frontend: http://localhost:8501"
+	@echo "Backend API: http://localhost:8000"
+	@echo "Documentation: http://localhost:8000/docs"
 
-logs: ## Voir les logs en temps réel
-	docker-compose logs -f
+down: ## Arrête les services
+	@echo "$(YELLOW)🛑 Arrêt des services...$(RESET)"
+	docker compose down
 
-test: ## Tester si les services répondent
-	@echo "🧪 Test du backend..."
-	@curl -s http://localhost:8000/health || echo "❌ Backend non disponible"
-	@echo "🧪 Test du frontend..."
-	@curl -s http://localhost:8501 > /dev/null && echo "✅ Frontend accessible" || echo "❌ Frontend non disponible"
+logs: ## Affiche les logs
+	docker compose logs -f
 
-clean: ## Nettoyer
-	docker-compose down -v --rmi all
+test: ## Tests d'intégration complets
+	@echo "$(GREEN)🧪 Lancement des tests d'intégration...$(RESET)"
+	./scripts/test-integration.sh
+
+test-quick: ## Tests rapides de connectivité
+	@echo "$(GREEN)🧪 Tests de connectivité...$(RESET)"
+	@echo "Test backend..."
+	@curl -sf http://localhost:8000/health > /dev/null && echo "✅ Backend OK" || echo "❌ Backend KO"
+	@echo "Test frontend..."
+	@curl -sf http://localhost:8501 > /dev/null && echo "✅ Frontend OK" || echo "❌ Frontend KO"
 
 status: ## Statut des services
-	docker-compose ps
+	@echo "$(GREEN)📊 Statut des services:$(RESET)"
+	docker compose ps
+
+clean: ## Nettoyage complet
+	@echo "$(RED)🧹 Nettoyage complet...$(RESET)"
+	docker compose down -v --remove-orphans
+	docker system prune -f
+
+rebuild: clean build up ## Reconstruction complète
+
+# Déploiements avec scripts automatisés
+deploy-dev: ## Déploiement développement
+	@echo "$(BLUE)🔧 Déploiement développement...$(RESET)"
+	./scripts/deploy.sh dev
+
+deploy-staging: ## Déploiement staging
+	@echo "$(BLUE)🧪 Déploiement staging...$(RESET)"
+	./scripts/deploy.sh staging
+
+deploy-prod: ## Déploiement production
+	@echo "$(BLUE)🏭 Déploiement production...$(RESET)"
+	./scripts/deploy.sh production
+
+# Alias pour compatibilité
+dev: deploy-dev ## Alias pour deploy-dev
+staging: deploy-staging ## Alias pour deploy-staging  
+prod: deploy-prod ## Alias pour deploy-prod
+
+# Monitoring
+monitoring: ## Démarre uniquement les services de monitoring
+	@echo "$(GREEN)📊 Démarrage monitoring...$(RESET)"
+	docker compose up -d prometheus grafana
+	@echo "Prometheus: http://localhost:9090"
+	@echo "Grafana: http://localhost:3000"
+
+# Gestion des logs
+logs-backend: ## Logs du backend uniquement
+	docker compose logs -f mnist-backend
+
+logs-frontend: ## Logs du frontend uniquement
+	docker compose logs -f mnist-frontend
+
+logs-monitoring: ## Logs du monitoring
+	docker compose logs -f prometheus grafana
+
+# Utilitaires
+shell-backend: ## Shell dans le container backend
+	docker compose exec mnist-backend bash
+
+shell-frontend: ## Shell dans le container frontend
+	docker compose exec mnist-frontend bash
+
+backup: ## Sauvegarde des données
+	@echo "$(GREEN)💾 Sauvegarde des données...$(RESET)"
+	mkdir -p backups/$(shell date +%Y%m%d_%H%M%S)
+	docker compose exec mnist-backend tar czf - /app/logs 2>/dev/null | tar xzf - -C backups/$(shell date +%Y%m%d_%H%M%S)/ || echo "Pas de logs backend"
+
+# Tests de performance
+load-test: ## Test de charge basique
+	@echo "$(GREEN)⚡ Test de charge...$(RESET)"
+	for i in {1..50}; do curl -s http://localhost:8000/health > /dev/null & done; wait
+	@echo "✅ Test de charge terminé"
