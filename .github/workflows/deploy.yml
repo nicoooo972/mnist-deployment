@@ -160,10 +160,10 @@ jobs:
       if: needs.deploy.result == 'success'
       run: |
         echo "✅ Deployment successful!"
-        # curl -X POST $SLACK_WEBHOOK -d '{"text":"✅ MNIST app deployed successfully to ${{ github.event.inputs.environment || 'staging' }}"}'
+        # curl -X POST $SLACK_WEBHOOK -d "{\"text\":\"✅ MNIST app deployed successfully to ${{ github.event.inputs.environment || 'staging' }}\"}"
         
     - name: Notify failure
       if: needs.deploy.result == 'failure'
       run: |
         echo "❌ Deployment failed!"
-        # curl -X POST $SLACK_WEBHOOK -d '{"text":"❌ MNIST app deployment failed on ${{ github.event.inputs.environment || 'staging' }}"}' 
+        # curl -X POST $SLACK_WEBHOOK -d "{\"text\":\"❌ MNIST app deployment failed on ${{ github.event.inputs.environment || 'staging' }}\"}" 
