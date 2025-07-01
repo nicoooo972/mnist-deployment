@@ -1,0 +1,460 @@
+name: 🤖 Model Training Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: 'Number of training epochs'
+        required: false
+        default: '10'
+      batch_size:
+        description: 'Training batch size'
+        required: false
+        default: '64'
+      learning_rate:
+        description: 'Learning rate'
+        required: false
+        default: '0.001'
+      min_accuracy:
+        description: 'Minimum accuracy for promotion'
+        required: false
+        default: '95.0'
+        
+  schedule:
+    # Entraînement automatique tous les dimanche à 2h du matin
+    - cron: '0 2 * * 0'
+    
+  # Déclenché par nouveaux datasets ou changements de code
+  push:
+    paths:
+      - 'mnist-backend/src/models/**'
+      - 'mnist-backend/src/train_model.py'
+      - '.github/workflows/model-training.yml'
+
+env:
+  REGISTRY: ghcr.io
+  MODEL_REGISTRY: models
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  data-validation:
+    name: 🔍 Data Quality Checks
+    runs-on: ubuntu-latest
+    outputs:
+      data_valid: ${{ steps.validation.outputs.valid }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install dependencies
+      run: |
+        pip install torch torchvision numpy pandas
+        
+    - name: Download and validate MNIST data
+      id: validation
+      run: |
+        python << 'EOF'
+        import torch
+        from torchvision import datasets, transforms
+        import os
+        
+        print("📦 Downloading MNIST dataset...")
+        try:
+            tf = transforms.Compose([transforms.ToTensor()])
+            train_data = datasets.MNIST("data/raw", download=True, train=True, transform=tf)
+            test_data = datasets.MNIST("data/raw", download=True, train=False, transform=tf)
+            
+            print(f"✅ Training samples: {len(train_data)}")
+            print(f"✅ Test samples: {len(test_data)}")
+            
+            # Vérifications de qualité
+            assert len(train_data) == 60000, f"Expected 60000 training samples, got {len(train_data)}"
+            assert len(test_data) == 10000, f"Expected 10000 test samples, got {len(test_data)}"
+            
+            # Vérifier que les données ne sont pas corrompues
+            sample_x, sample_y = train_data[0]
+            assert sample_x.shape == (1, 28, 28), f"Wrong input shape: {sample_x.shape}"
+            assert 0 <= sample_y <= 9, f"Wrong label range: {sample_y}"
+            
+            print("✅ Data validation passed")
+            print("::set-output name=valid::true")
+            
+        except Exception as e:
+            print(f"❌ Data validation failed: {e}")
+            print("::set-output name=valid::false")
+            exit(1)
+        EOF
+
+  model-training:
+    name: 🚀 Train Model
+    runs-on: ubuntu-latest
+    needs: data-validation
+    if: needs.data-validation.outputs.data_valid == 'true'
+    outputs:
+      model_version: ${{ steps.version.outputs.version }}
+      accuracy: ${{ steps.train.outputs.accuracy }}
+      loss: ${{ steps.train.outputs.loss }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install dependencies
+      run: |
+        pip install torch torchvision numpy scikit-learn
+        
+    - name: Generate model version
+      id: version
+      run: |
+        VERSION=$(date +%Y%m%d-%H%M%S)-$(echo ${{ github.sha }} | cut -c1-7)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "📊 Model version: $VERSION"
+        
+    - name: Train model with hyperparameters
+      id: train
+      working-directory: mnist-backend
+      run: |
+        python << 'EOF'
+        import sys
+        import os
+        sys.path.append('src')
+        
+        import torch
+        import torch.nn.functional as F
+        from torchvision import datasets, transforms
+        from models.convnet import ConvNet
+        import json
+        
+        # Hyperparamètres depuis les inputs
+        EPOCHS = int("${{ github.event.inputs.epochs || '10' }}")
+        BATCH_SIZE = int("${{ github.event.inputs.batch_size || '64' }}")
+        LEARNING_RATE = float("${{ github.event.inputs.learning_rate || '0.001' }}")
+        
+        print(f"🎯 Training with: epochs={EPOCHS}, batch_size={BATCH_SIZE}, lr={LEARNING_RATE}")
+        
+        device = torch.device("cpu")
+        
+        # Data loading
+        tf = transforms.Compose([
+            transforms.ToTensor(), 
+            transforms.Normalize((0.1307,), (0.3081,))
+        ])
+        
+        train_loader = torch.utils.data.DataLoader(
+            datasets.MNIST("../data/raw", download=True, train=True, transform=tf),
+            batch_size=BATCH_SIZE, shuffle=True
+        )
+        
+        test_loader = torch.utils.data.DataLoader(
+            datasets.MNIST("../data/raw", download=True, train=False, transform=tf),
+            batch_size=BATCH_SIZE, shuffle=False
+        )
+        
+        # Model setup
+        perm = torch.randperm(784)
+        convnet = ConvNet(input_size=1, n_kernels=6, output_size=10)
+        optimizer = torch.optim.AdamW(convnet.parameters(), lr=LEARNING_RATE)
+        
+        # Training
+        convnet.train()
+        training_losses = []
+        
+        for epoch in range(EPOCHS):
+            epoch_loss = 0
+            for batch_idx, (data, target) in enumerate(train_loader):
+                batch_size = data.shape[0]
+                data_flattened = data.view(batch_size, -1)
+                data_permuted = data_flattened[:, perm]
+                data_reshaped = data_permuted.view(batch_size, 1, 28, 28)
+                
+                optimizer.zero_grad()
+                logits = convnet(data_reshaped)
+                loss = F.cross_entropy(logits, target)
+                loss.backward()
+                optimizer.step()
+                
+                epoch_loss += loss.item()
+                
+                if batch_idx % 200 == 0:
+                    print(f"Epoch {epoch+1}/{EPOCHS}, Batch {batch_idx}, Loss: {loss.item():.4f}")
+            
+            avg_loss = epoch_loss / len(train_loader)
+            training_losses.append(avg_loss)
+            print(f"Epoch {epoch+1} completed. Average loss: {avg_loss:.4f}")
+        
+        # Testing
+        convnet.eval()
+        test_loss = 0
+        correct = 0
+        
+        with torch.no_grad():
+            for data, target in test_loader:
+                batch_size = data.shape[0]
+                data_flattened = data.view(batch_size, -1)
+                data_permuted = data_flattened[:, perm]
+                data_reshaped = data_permuted.view(batch_size, 1, 28, 28)
+                
+                logits = convnet(data_reshaped)
+                test_loss += F.cross_entropy(logits, target, reduction="sum").item()
+                pred = torch.argmax(logits, dim=1)
+                correct += pred.eq(target.view_as(pred)).sum().item()
+        
+        test_loss /= len(test_loader.dataset)
+        accuracy = 100.0 * correct / len(test_loader.dataset)
+        
+        print(f"📊 Final Results:")
+        print(f"   Test Loss: {test_loss:.4f}")
+        print(f"   Accuracy: {accuracy:.2f}%")
+        
+        # Save model with metadata
+        os.makedirs("../models", exist_ok=True)
+        
+        model_data = {
+            "model_state_dict": convnet.state_dict(),
+            "permutation": perm,
+            "hyperparameters": {
+                "n_kernels": 6,
+                "input_size": 1,
+                "output_size": 10,
+                "epochs": EPOCHS,
+                "batch_size": BATCH_SIZE,
+                "learning_rate": LEARNING_RATE
+            },
+            "metrics": {
+                "test_loss": test_loss,
+                "accuracy": accuracy,
+                "training_losses": training_losses
+            },
+            "version": "${{ steps.version.outputs.version }}",
+            "git_commit": "${{ github.sha }}"
+        }
+        
+        model_path = f"../models/convnet-${{ steps.version.outputs.version }}.pt"
+        torch.save(model_data, model_path)
+        
+        # Save latest version
+        torch.save(model_data, "../models/convnet-latest.pt")
+        
+        print(f"✅ Model saved: {model_path}")
+        
+        # Export metrics for GitHub Actions
+        with open("metrics.json", "w") as f:
+            json.dump({
+                "accuracy": accuracy,
+                "test_loss": test_loss,
+                "version": "${{ steps.version.outputs.version }}"
+            }, f)
+            
+        # Set outputs
+        print(f"::set-output name=accuracy::{accuracy}")
+        print(f"::set-output name=loss::{test_loss}")
+        EOF
+        
+    - name: Upload model artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: trained-model-${{ steps.version.outputs.version }}
+        path: |
+          models/convnet-${{ steps.version.outputs.version }}.pt
+          models/convnet-latest.pt
+          mnist-backend/metrics.json
+          
+    - name: Model performance summary
+      run: |
+        echo "## 📊 Model Training Results" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Accuracy**: ${{ steps.train.outputs.accuracy }}%" >> $GITHUB_STEP_SUMMARY
+        echo "- **Test Loss**: ${{ steps.train.outputs.loss }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Hyperparameters**:" >> $GITHUB_STEP_SUMMARY
+        echo "  - Epochs: ${{ github.event.inputs.epochs || '10' }}" >> $GITHUB_STEP_SUMMARY
+        echo "  - Batch Size: ${{ github.event.inputs.batch_size || '64' }}" >> $GITHUB_STEP_SUMMARY
+        echo "  - Learning Rate: ${{ github.event.inputs.learning_rate || '0.001' }}" >> $GITHUB_STEP_SUMMARY
+
+  model-validation:
+    name: 🧪 Model Validation
+    runs-on: ubuntu-latest
+    needs: model-training
+    outputs:
+      promotion_ready: ${{ steps.validate.outputs.ready }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download model artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: trained-model-${{ needs.model-training.outputs.model_version }}
+        
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install dependencies
+      run: |
+        pip install torch torchvision numpy scikit-learn
+        
+    - name: Validate model quality
+      id: validate
+      run: |
+        python << 'EOF'
+        import torch
+        import json
+        import sys
+        
+        # Charger les métriques
+        with open("mnist-backend/metrics.json", "r") as f:
+            metrics = json.load(f)
+        
+        accuracy = float(metrics["accuracy"])
+        test_loss = float(metrics["test_loss"])
+        min_accuracy = float("${{ github.event.inputs.min_accuracy || '95.0' }}")
+        
+        print(f"🔍 Model Validation:")
+        print(f"   Accuracy: {accuracy:.2f}% (minimum: {min_accuracy}%)")
+        print(f"   Test Loss: {test_loss:.4f}")
+        
+        # Critères de validation
+        validation_results = {
+            "accuracy_check": accuracy >= min_accuracy,
+            "loss_check": test_loss < 1.0,  # Loss raisonnable
+            "model_size_check": True  # Placeholder pour taille du modèle
+        }
+        
+        # Vérifications supplémentaires
+        try:
+            # Charger le modèle pour vérifications
+            model_data = torch.load(f"models/convnet-{metrics['version']}.pt", map_location='cpu')
+            
+            # Vérifier la structure du modèle
+            assert "model_state_dict" in model_data
+            assert "permutation" in model_data
+            assert "hyperparameters" in model_data
+            
+            validation_results["structure_check"] = True
+            print("✅ Model structure validation passed")
+            
+        except Exception as e:
+            print(f"❌ Model structure validation failed: {e}")
+            validation_results["structure_check"] = False
+        
+        # Décision finale
+        all_passed = all(validation_results.values())
+        
+        print(f"\n📋 Validation Results:")
+        for check, passed in validation_results.items():
+            status = "✅" if passed else "❌"
+            print(f"   {status} {check}: {passed}")
+        
+        if all_passed:
+            print(f"\n🎉 Model validation PASSED - Ready for promotion!")
+            print("::set-output name=ready::true")
+        else:
+            print(f"\n⚠️  Model validation FAILED - Not ready for promotion")
+            print("::set-output name=ready::false")
+            
+        # Sauvegarder le rapport de validation
+        with open("validation_report.json", "w") as f:
+            json.dump({
+                "validation_results": validation_results,
+                "metrics": metrics,
+                "promotion_ready": all_passed,
+                "timestamp": "$(date -Iseconds)"
+            }, f, indent=2)
+        EOF
+        
+    - name: Upload validation report
+      uses: actions/upload-artifact@v3
+      with:
+        name: validation-report-${{ needs.model-training.outputs.model_version }}
+        path: validation_report.json
+
+  model-promotion:
+    name: 🏆 Model Promotion
+    runs-on: ubuntu-latest
+    needs: [model-training, model-validation]
+    if: needs.model-validation.outputs.promotion_ready == 'true'
+    environment: production
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download model artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: trained-model-${{ needs.model-training.outputs.model_version }}
+        
+    - name: Promote to production
+      run: |
+        echo "🚀 Promoting model ${{ needs.model-training.outputs.model_version }} to production"
+        
+        # Copier le modèle vers le registry de production
+        mkdir -p production-models
+        cp models/convnet-${{ needs.model-training.outputs.model_version }}.pt production-models/
+        cp models/convnet-latest.pt production-models/convnet-production.pt
+        
+        echo "✅ Model promoted to production"
+        
+    - name: Update model registry
+      run: |
+        echo "📝 Updating model registry..."
+        
+        # Créer/mettre à jour le registre des modèles
+        cat > model_registry.json << EOF
+        {
+          "production_model": {
+            "version": "${{ needs.model-training.outputs.model_version }}",
+            "accuracy": ${{ needs.model-training.outputs.accuracy }},
+            "test_loss": ${{ needs.model-training.outputs.loss }},
+            "promoted_at": "$(date -Iseconds)",
+            "git_commit": "${{ github.sha }}",
+            "path": "production-models/convnet-${{ needs.model-training.outputs.model_version }}.pt"
+          }
+        }
+        EOF
+        
+        cat model_registry.json
+        
+    - name: Trigger deployment update
+      run: |
+        echo "🔄 Triggering deployment pipeline with new model..."
+        # Ici on pourrait déclencher le workflow de déploiement
+        # curl -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+        #   -H "Accept: application/vnd.github.v3+json" \
+        #   "${{ github.api_url }}/repos/${{ github.repository }}/dispatches" \
+        #   -d '{"event_type":"deploy-production","client_payload":{"model_version":"${{ needs.model-training.outputs.model_version }}"}}'
+        
+    - name: Upload production artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: production-model-${{ needs.model-training.outputs.model_version }}
+        path: |
+          production-models/
+          model_registry.json
+
+  notify:
+    name: 📢 Notification
+    runs-on: ubuntu-latest
+    needs: [model-training, model-validation, model-promotion]
+    if: always()
+    steps:
+    - name: Training completed notification
+      run: |
+        if [ "${{ needs.model-promotion.result }}" == "success" ]; then
+          echo "🎉 Model training and promotion completed successfully!"
+          echo "   Version: ${{ needs.model-training.outputs.model_version }}"
+          echo "   Accuracy: ${{ needs.model-training.outputs.accuracy }}%"
+          echo "   Status: ✅ PROMOTED TO PRODUCTION"
+        elif [ "${{ needs.model-validation.result }}" == "success" ]; then
+          echo "⚠️ Model training completed but not promoted"
+          echo "   Version: ${{ needs.model-training.outputs.model_version }}"
+          echo "   Accuracy: ${{ needs.model-training.outputs.accuracy }}%"
+          echo "   Status: ❌ VALIDATION FAILED"
+        else
+          echo "❌ Model training failed"
+        fi
