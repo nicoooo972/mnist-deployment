@@ -55,9 +55,8 @@ jobs:
   code-quality:
     name: 🧹 Code Quality & Security
     runs-on: ubuntu-latest
+    needs: [setup]
     steps:
-    - uses: actions/checkout@v4
-    
     - name: Checkout backend code
       uses: actions/checkout@v4
       with:
@@ -65,29 +64,19 @@ jobs:
         path: backend
         token: ${{ secrets.GITHUB_TOKEN }}
     
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v1
       with:
         credentials_json: ${{ secrets.GCP_SA_KEY }}
-        
-    - name: Install dependencies
-      run: |
-        cd backend
-        pip install -r requirements.txt
-        pip install google-cloud-aiplatform google-cloud-storage
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
         
     - name: Run Cloud Code Analysis
       run: |
         cd backend
-        # Utiliser Cloud Build pour l'analyse de code
-        gcloud builds submit \
-          --config=.cloudbuild/code-analysis.yaml \
-          --substitutions=_REPO_NAME=mnist-backend
+        # Utilise Cloud Build pour exécuter les tests de qualité
+        gcloud builds submit . --config=.cloudbuild/code-analysis.yaml
 
   vertex-ai-training:
     name: 🚀 Vertex AI Training
@@ -271,27 +260,28 @@ jobs:
   security-scan:
     name: 🔒 Security Scanning
     runs-on: ubuntu-latest
+    needs: [setup, cloud-run-deployment]
     steps:
-    - uses: actions/checkout@v4
-    
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v1
       with:
         credentials_json: ${{ secrets.GCP_SA_KEY }}
         
-    - name: Container Security Scan
+    - name: Scan Container for Vulnerabilities
       run: |
-        # Binary Authorization et Container Analysis
-        gcloud container images scan \
-          $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mnist-api:${{ needs.setup.outputs.image_tag }} \
-          --remote
+        echo "🔒 Scanning container image for vulnerabilities..."
+        IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mnist-api:${{ needs.setup.outputs.image_tag }}"
         
-        # Vérifier les vulnérabilités
-        VULNERABILITIES=$(gcloud container images list-tags \
-          $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mnist-api \
-          --format="value(digest)" \
-          --filter="tags:${{ needs.setup.outputs.image_tag }}" \
-          --limit=1)
+        # Commande correcte pour scanner une image dans Artifact Registry
+        gcloud artifacts docker images scan $IMAGE_URI --format=json > scan-results.json
+        
+        echo "✅ Scan complete. Results saved to scan-results.json"
+        
+    - name: Upload scan results
+      uses: actions/upload-artifact@v4
+      with:
+        name: container-scan-results
+        path: scan-results.json
 
   notification:
     name: 📢 Notification
