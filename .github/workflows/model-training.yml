@@ -81,11 +81,11 @@ jobs:
             assert 0 <= sample_y <= 9, f"Wrong label range: {sample_y}"
             
             print("✅ Data validation passed")
-            print("::set-output name=valid::true")
+                         print("valid=true", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
             
         except Exception as e:
             print(f"❌ Data validation failed: {e}")
-            print("::set-output name=valid::false")
+                         print("valid=false", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
             exit(1)
         EOF
 
@@ -252,13 +252,14 @@ jobs:
                 "version": "${{ steps.version.outputs.version }}"
             }, f)
             
-        # Set outputs
-        print(f"::set-output name=accuracy::{accuracy}")
-        print(f"::set-output name=loss::{test_loss}")
+                 # Set outputs
+         with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+             f.write(f"accuracy={accuracy}\n")
+             f.write(f"loss={test_loss}\n")
         EOF
         
     - name: Upload model artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: trained-model-${{ steps.version.outputs.version }}
         path: |
@@ -287,7 +288,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Download model artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: trained-model-${{ needs.model-training.outputs.model_version }}
         
@@ -352,12 +353,14 @@ jobs:
             status = "✅" if passed else "❌"
             print(f"   {status} {check}: {passed}")
         
-        if all_passed:
-            print(f"\n🎉 Model validation PASSED - Ready for promotion!")
-            print("::set-output name=ready::true")
-        else:
-            print(f"\n⚠️  Model validation FAILED - Not ready for promotion")
-            print("::set-output name=ready::false")
+                 if all_passed:
+             print(f"\n🎉 Model validation PASSED - Ready for promotion!")
+             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                 f.write("ready=true\n")
+         else:
+             print(f"\n⚠️  Model validation FAILED - Not ready for promotion")
+             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                 f.write("ready=false\n")
             
         # Sauvegarder le rapport de validation
         with open("validation_report.json", "w") as f:
@@ -370,7 +373,7 @@ jobs:
         EOF
         
     - name: Upload validation report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: validation-report-${{ needs.model-training.outputs.model_version }}
         path: validation_report.json
@@ -385,7 +388,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Download model artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: trained-model-${{ needs.model-training.outputs.model_version }}
         
@@ -430,7 +433,7 @@ jobs:
         #   -d '{"event_type":"deploy-production","client_payload":{"model_version":"${{ needs.model-training.outputs.model_version }}"}}'
         
     - name: Upload production artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: production-model-${{ needs.model-training.outputs.model_version }}
         path: |
