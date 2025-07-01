@@ -102,6 +102,10 @@ jobs:
       loss: ${{ steps.train.outputs.loss }}
     steps:
     - uses: actions/checkout@v4
+      with:
+        repository: nicoooo972/IA
+        path: main-repo
+        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -121,7 +125,7 @@ jobs:
         
     - name: Train model with hyperparameters
       id: train
-      working-directory: mnist-backend
+      working-directory: main-repo/mnist-backend
       run: |
         python << 'EOF'
         import sys
@@ -150,12 +154,12 @@ jobs:
         ])
         
         train_loader = torch.utils.data.DataLoader(
-            datasets.MNIST("../data/raw", download=True, train=True, transform=tf),
+            datasets.MNIST("../../data/raw", download=True, train=True, transform=tf),
             batch_size=BATCH_SIZE, shuffle=True
         )
         
         test_loader = torch.utils.data.DataLoader(
-            datasets.MNIST("../data/raw", download=True, train=False, transform=tf),
+            datasets.MNIST("../../data/raw", download=True, train=False, transform=tf),
             batch_size=BATCH_SIZE, shuffle=False
         )
         
@@ -216,7 +220,7 @@ jobs:
         print(f"   Accuracy: {accuracy:.2f}%")
         
         # Save model with metadata
-        os.makedirs("../models", exist_ok=True)
+        os.makedirs("../../models", exist_ok=True)
         
         model_data = {
             "model_state_dict": convnet.state_dict(),
@@ -238,11 +242,11 @@ jobs:
             "git_commit": "${{ github.sha }}"
         }
         
-        model_path = f"../models/convnet-${{ steps.version.outputs.version }}.pt"
+        model_path = f"../../models/convnet-${{ steps.version.outputs.version }}.pt"
         torch.save(model_data, model_path)
         
         # Save latest version
-        torch.save(model_data, "../models/convnet-latest.pt")
+        torch.save(model_data, "../../models/convnet-latest.pt")
         
         print(f"✅ Model saved: {model_path}")
         
@@ -267,7 +271,7 @@ jobs:
         path: |
           models/convnet-${{ steps.version.outputs.version }}.pt
           models/convnet-latest.pt
-          mnist-backend/metrics.json
+          main-repo/mnist-backend/metrics.json
           
     - name: Model performance summary
       run: |
@@ -288,6 +292,10 @@ jobs:
       promotion_ready: ${{ steps.validate.outputs.ready }}
     steps:
     - uses: actions/checkout@v4
+      with:
+        repository: nicoooo972/IA
+        path: main-repo
+        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Download model artifacts
       uses: actions/download-artifact@v4
@@ -312,7 +320,7 @@ jobs:
         import sys
         
         # Charger les métriques
-        with open("mnist-backend/metrics.json", "r") as f:
+        with open("main-repo/mnist-backend/metrics.json", "r") as f:
             metrics = json.load(f)
         
         accuracy = float(metrics["accuracy"])
@@ -388,6 +396,10 @@ jobs:
     environment: production
     steps:
     - uses: actions/checkout@v4
+      with:
+        repository: nicoooo972/IA
+        path: main-repo
+        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Download model artifacts
       uses: actions/download-artifact@v4
