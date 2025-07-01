@@ -409,8 +409,6 @@ jobs:
         echo "=== MODEL VALIDATION ==="
         echo "Result: ${{ needs.model-validation.result }}"
         echo "Promotion ready: '${{ needs.model-validation.outputs.promotion_ready }}'"
-        echo "Type: ${{ type(needs.model-validation.outputs.promotion_ready) }}"
-        echo "Length: ${{ length(needs.model-validation.outputs.promotion_ready) }}"
         echo "Equals 'true': ${{ needs.model-validation.outputs.promotion_ready == 'true' }}"
         echo "Contains true: ${{ contains(needs.model-validation.outputs.promotion_ready, 'true') }}"
 
