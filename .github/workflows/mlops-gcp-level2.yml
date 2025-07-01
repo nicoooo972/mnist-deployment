@@ -1,0 +1,311 @@
+name: 🔥 MLOps Level 2 - Google Cloud
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: europe-west1
+  ARTIFACT_REGISTRY: mnist-models
+  SERVICE_NAME: mnist-api
+  
+jobs:
+  setup:
+    name: 🔧 Setup GCP Environment
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+      vertex_ai_endpoint: ${{ steps.vars.outputs.vertex_ai_endpoint }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up variables
+      id: vars
+      run: |
+        IMAGE_TAG="${GITHUB_SHA:0:8}-$(date +%s)"
+        echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+        echo "vertex_ai_endpoint=projects/$PROJECT_ID/locations/$REGION/endpoints" >> $GITHUB_OUTPUT
+    
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+    
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        project_id: ${{ env.PROJECT_ID }}
+
+  code-quality:
+    name: 🧹 Code Quality & Security
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Checkout backend code
+      uses: actions/checkout@v4
+      with:
+        repository: nicoooo972/mnist-backend
+        path: backend
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: Install dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+        pip install google-cloud-aiplatform google-cloud-storage
+        
+    - name: Run Cloud Code Analysis
+      run: |
+        cd backend
+        # Utiliser Cloud Build pour l'analyse de code
+        gcloud builds submit \
+          --config=.cloudbuild/code-analysis.yaml \
+          --substitutions=_REPO_NAME=mnist-backend
+
+  vertex-ai-training:
+    name: 🚀 Vertex AI Training
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: Submit Vertex AI Training Job
+      run: |
+        # Créer un job d'entraînement Vertex AI
+        MODEL_VERSION="mnist-$(date +%Y%m%d-%H%M%S)"
+        
+        gcloud ai custom-jobs create \
+          --region=$REGION \
+          --display-name="mnist-training-$MODEL_VERSION" \
+          --worker-pool-spec=machine-type=n1-standard-4,replica-count=1,container-image-uri=gcr.io/cloud-ml-algos/pytorch_gpu
+        
+        echo "✅ Vertex AI training job submitted"
+
+  model-validation:
+    name: 🧪 Vertex AI Model Validation
+    runs-on: ubuntu-latest
+    needs: vertex-ai-training
+    outputs:
+      validation_passed: ${{ steps.validate.outputs.passed }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: Validate Model with Vertex AI
+      id: validate
+      run: |
+        # Utiliser Vertex AI Model Evaluation
+        gcloud ai models upload \
+          --region=$REGION \
+          --display-name="mnist-candidate-${{ needs.vertex-ai-training.outputs.model_version }}" \
+          --artifact-uri="${{ needs.vertex-ai-training.outputs.model_uri }}" \
+          --container-image-uri="gcr.io/cloud-aiplatform/prediction/pytorch-gpu.1-13:latest"
+        
+        # Lancer l'évaluation
+        gcloud ai model-evaluation-jobs create \
+          --region=$REGION \
+          --display-name="mnist-eval-${{ needs.vertex-ai-training.outputs.model_version }}" \
+          --model="${{ needs.vertex-ai-training.outputs.model_version }}" \
+          --evaluation-data-uri="gs://$PROJECT_ID-mlops-bucket/test-data/"
+        
+        # Récupérer les métriques
+        ACCURACY=$(gcloud ai model-evaluation-jobs describe \
+          mnist-eval-${{ needs.vertex-ai-training.outputs.model_version }} \
+          --region=$REGION \
+          --format="value(metrics.accuracy)")
+        
+        if (( $(echo "$ACCURACY > 0.95" | bc -l) )); then
+          echo "passed=true" >> $GITHUB_OUTPUT
+          echo "✅ Model validation passed with accuracy: $ACCURACY"
+        else
+          echo "passed=false" >> $GITHUB_OUTPUT
+          echo "❌ Model validation failed with accuracy: $ACCURACY"
+        fi
+
+  cloud-run-deployment:
+    name: 🚢 Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    needs: vertex-ai-training
+    steps:
+    - name: Deploy to Cloud Run
+      run: |
+        gcloud run deploy ${SERVICE_NAME} \
+          --image=gcr.io/$PROJECT_ID/mnist-api:latest \
+          --region=$REGION \
+          --platform=managed \
+          --allow-unauthenticated
+        
+        echo "✅ Deployed to Cloud Run"
+
+  vertex-ai-endpoint:
+    name: 🎯 Deploy to Vertex AI Endpoint
+    runs-on: ubuntu-latest
+    needs: [model-validation, vertex-ai-training]
+    if: needs.model-validation.outputs.validation_passed == 'true' && github.ref == 'refs/heads/main'
+    steps:
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: Deploy Model to Vertex AI Endpoint
+      run: |
+        # Créer un endpoint si n'existe pas
+        ENDPOINT_ID=$(gcloud ai endpoints list \
+          --region=$REGION \
+          --filter="displayName:mnist-production" \
+          --format="value(name)" | head -1)
+        
+        if [ -z "$ENDPOINT_ID" ]; then
+          gcloud ai endpoints create \
+            --region=$REGION \
+            --display-name="mnist-production"
+          
+          ENDPOINT_ID=$(gcloud ai endpoints list \
+            --region=$REGION \
+            --filter="displayName:mnist-production" \
+            --format="value(name)" | head -1)
+        fi
+        
+        # Déployer le modèle sur l'endpoint
+        gcloud ai endpoints deploy-model $ENDPOINT_ID \
+          --region=$REGION \
+          --model=${{ needs.vertex-ai-training.outputs.model_version }} \
+          --display-name="mnist-${{ needs.vertex-ai-training.outputs.model_version }}" \
+          --machine-type="n1-standard-2" \
+          --min-replica-count=1 \
+          --max-replica-count=10 \
+          --traffic-split=0=100
+
+  ab-testing-vertex:
+    name: 🧪 A/B Testing with Vertex AI
+    runs-on: ubuntu-latest
+    needs: [vertex-ai-endpoint]
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
+    steps:
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: Setup A/B Test with Traffic Split
+      run: |
+        # Récupérer l'endpoint production
+        ENDPOINT_ID=$(gcloud ai endpoints list \
+          --region=$REGION \
+          --filter="displayName:mnist-production" \
+          --format="value(name)")
+        
+        # Configuration du traffic split (90% ancien, 10% nouveau)
+        gcloud ai endpoints update-traffic-split $ENDPOINT_ID \
+          --region=$REGION \
+          --traffic-split="old-model=90,new-model=10"
+        
+        echo "🧪 A/B test configured with 10% traffic to new model"
+
+  monitoring-setup:
+    name: 📊 Setup Cloud Monitoring
+    runs-on: ubuntu-latest
+    needs: [cloud-run-deployment]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: Configure Cloud Monitoring
+      run: |
+        # Créer des politiques d'alerting
+        gcloud alpha monitoring policies create \
+          --policy-from-file=monitoring/gcp-alerting-policy.yaml
+        
+        # Setup custom metrics pour ML
+        gcloud logging metrics create model_accuracy \
+          --description="Model accuracy metric" \
+          --log-filter='resource.type="cloud_run_revision" AND jsonPayload.accuracy'
+        
+        # Dashboards Vertex AI Model Monitoring
+        gcloud ai model-monitoring-jobs create \
+          --region=$REGION \
+          --display-name="mnist-monitoring" \
+          --model-endpoint=${{ needs.setup.outputs.vertex_ai_endpoint }} \
+          --config=monitoring/vertex-monitoring-config.yaml
+
+  security-scan:
+    name: 🔒 Security Scanning
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+        
+    - name: Container Security Scan
+      run: |
+        # Binary Authorization et Container Analysis
+        gcloud container images scan \
+          $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mnist-api:${{ needs.setup.outputs.image_tag }} \
+          --remote
+        
+        # Vérifier les vulnérabilités
+        VULNERABILITIES=$(gcloud container images list-tags \
+          $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mnist-api \
+          --format="value(digest)" \
+          --filter="tags:${{ needs.setup.outputs.image_tag }}" \
+          --limit=1)
+
+  notification:
+    name: 📢 Notification
+    runs-on: ubuntu-latest
+    needs: [cloud-run-deployment, vertex-ai-endpoint, monitoring-setup]
+    if: always()
+    steps:
+    - name: Send notification
+      run: |
+        # Notification via Pub/Sub ou Cloud Functions
+        if [ "${{ needs.cloud-run-deployment.result }}" == "success" ]; then
+          gcloud pubsub topics publish mlops-notifications \
+            --message='{"status": "success", "deployment": "cloud-run", "version": "${{ needs.setup.outputs.image_tag }}"}'
+        else
+          gcloud pubsub topics publish mlops-notifications \
+            --message='{"status": "failed", "deployment": "cloud-run", "error": "Deployment failed"}'
+        fi 

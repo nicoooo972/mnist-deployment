@@ -1,0 +1,139 @@
+# Configuration de l'environnement de production
+# Ce fichier définit les règles de sécurité et de déploiement pour la production
+
+name: production
+
+# Protection rules
+protection_rules:
+  # Reviewers requis
+  required_reviewers:
+    - team: ml-ops-team
+      count: 2
+    - team: security-team  
+      count: 1
+  
+  # Branches autorisées
+  deployment_branch_policy:
+    protected_branches: true
+    custom_branch_policies:
+      - name: main
+        required: true
+      - name: release/*
+        required: false
+
+# Variables d'environnement de production
+environment_variables:
+  # Configuration générale
+  ENVIRONMENT: production
+  LOG_LEVEL: INFO
+  
+  # Configuration ML
+  MODEL_REGISTRY_URL: https://models.company.com
+  MODEL_VALIDATION_THRESHOLD: 95.0
+  AUTO_ROLLBACK_ENABLED: true
+  
+  # Configuration monitoring
+  PROMETHEUS_URL: https://prometheus.company.com
+  GRAFANA_URL: https://grafana.company.com
+  ALERTMANAGER_URL: https://alerts.company.com
+  
+  # Configuration sécurité
+  ENABLE_RATE_LIMITING: true
+  MAX_REQUESTS_PER_MINUTE: 1000
+  AUTH_REQUIRED: true
+  
+  # Configuration infrastructure
+  CLUSTER_NAME: prod-ml-cluster
+  NAMESPACE: mnist-production
+  REPLICAS: 3
+  RESOURCE_LIMITS_CPU: "2000m"
+  RESOURCE_LIMITS_MEMORY: "4Gi"
+
+# Secrets requis (définis dans GitHub)
+required_secrets:
+  - PROD_REGISTRY_TOKEN
+  - PROD_CLUSTER_CONFIG
+  - PROD_MONITORING_TOKEN
+  - SLACK_WEBHOOK_URL
+  - DATADOG_API_KEY
+
+# Gates de déploiement
+deployment_gates:
+  # Tests de pré-déploiement
+  pre_deployment:
+    - name: security_scan
+      timeout: 600
+      required: true
+    - name: performance_test
+      timeout: 1800
+      required: true
+    - name: integration_test
+      timeout: 900
+      required: true
+  
+  # Validation post-déploiement
+  post_deployment:
+    - name: health_check
+      timeout: 300
+      required: true
+    - name: smoke_test
+      timeout: 600
+      required: true
+    - name: monitoring_validation
+      timeout: 180
+      required: true
+
+# Configuration de rollback automatique
+auto_rollback:
+  enabled: true
+  triggers:
+    - metric: error_rate
+      threshold: 0.05
+      window: 5m
+    - metric: response_time_p95
+      threshold: 1.0
+      window: 5m
+    - metric: model_accuracy
+      threshold: 0.90
+      window: 15m
+
+# Notifications
+notifications:
+  channels:
+    - type: slack
+      webhook_secret: SLACK_WEBHOOK_URL
+      events:
+        - deployment_started
+        - deployment_success
+        - deployment_failed
+        - rollback_triggered
+    
+    - type: email
+      recipients:
+        - ml-ops@company.com
+        - sre@company.com
+      events:
+        - deployment_failed
+        - rollback_triggered
+        - security_alert
+
+# Maintenance windows
+maintenance_windows:
+  # Pas de déploiements pendant les heures de pointe
+  blocked_hours:
+    - start: "09:00"
+      end: "12:00"
+      timezone: "UTC"
+      days: ["monday", "tuesday", "wednesday", "thursday", "friday"]
+    - start: "14:00"
+      end: "17:00"
+      timezone: "UTC"  
+      days: ["monday", "tuesday", "wednesday", "thursday", "friday"]
+  
+  # Fenêtres de maintenance programmées
+  scheduled_maintenance:
+    - day: "sunday"
+      start: "02:00"
+      end: "06:00"
+      timezone: "UTC"
+      description: "Weekly maintenance window" 

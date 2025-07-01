@@ -1,0 +1,45 @@
+FROM python:3.11-slim
+
+# Métadonnées
+LABEL maintainer="ml-team@company.com"
+LABEL description="MNIST Training Container"
+LABEL version="1.0"
+
+# Variables d'environnement
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV TRAINING_ENV=container
+
+# Installer les dépendances système
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Créer un utilisateur non-root
+RUN groupadd -r mluser && useradd -r -g mluser mluser
+
+WORKDIR /app
+
+# Copier et installer les requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copier le code source
+COPY src/ ./src/
+COPY models/ ./models/
+COPY scripts/ ./scripts/
+
+# Créer les répertoires nécessaires
+RUN mkdir -p /app/data /app/logs /app/outputs \
+    && chown -R mluser:mluser /app
+
+# Passer à l'utilisateur non-root
+USER mluser
+
+# Point d'entrée pour l'entraînement
+ENTRYPOINT ["python", "-m", "src.train_model"]
+
+# Healthcheck pour vérifier que le conteneur fonctionne
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import torch; print('Container healthy')" || exit 1 

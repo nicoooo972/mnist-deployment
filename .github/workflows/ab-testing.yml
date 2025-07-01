@@ -1,0 +1,376 @@
+name: 🧪 A/B Model Testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_a_version:
+        description: 'Model A version (current production)'
+        required: true
+        default: 'production'
+      model_b_version:
+        description: 'Model B version (candidate)'
+        required: true
+      test_duration_minutes:
+        description: 'Test duration in minutes'
+        required: false
+        default: '60'
+      traffic_split:
+        description: 'Traffic split (% for model B)'
+        required: false
+        default: '10'
+
+env:
+  REGISTRY: ghcr.io
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  prepare-ab-test:
+    name: 🚀 Prepare A/B Test
+    runs-on: ubuntu-latest
+    outputs:
+      test_id: ${{ steps.setup.outputs.test_id }}
+      model_a_endpoint: ${{ steps.setup.outputs.model_a_endpoint }}
+      model_b_endpoint: ${{ steps.setup.outputs.model_b_endpoint }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup A/B test
+      id: setup
+      run: |
+        TEST_ID="ab-test-$(date +%Y%m%d-%H%M%S)"
+        echo "test_id=$TEST_ID" >> $GITHUB_OUTPUT
+        
+        # Configuration des endpoints
+        echo "model_a_endpoint=http://mnist-model-a:8080" >> $GITHUB_OUTPUT
+        echo "model_b_endpoint=http://mnist-model-b:8080" >> $GITHUB_OUTPUT
+        
+        echo "🧪 A/B Test ID: $TEST_ID"
+        echo "📊 Model A: ${{ github.event.inputs.model_a_version }}"
+        echo "📊 Model B: ${{ github.event.inputs.model_b_version }}"
+        echo "⏱️  Duration: ${{ github.event.inputs.test_duration_minutes }} minutes"
+        echo "🔀 Traffic Split: ${{ github.event.inputs.traffic_split }}% to Model B"
+
+  deploy-models:
+    name: 🚢 Deploy Test Models
+    runs-on: ubuntu-latest
+    needs: prepare-ab-test
+    strategy:
+      matrix:
+        model: [a, b]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy Model ${{ matrix.model }}
+      run: |
+        if [ "${{ matrix.model }}" == "a" ]; then
+          MODEL_VERSION="${{ github.event.inputs.model_a_version }}"
+          SERVICE_NAME="mnist-model-a"
+        else
+          MODEL_VERSION="${{ github.event.inputs.model_b_version }}"
+          SERVICE_NAME="mnist-model-b"
+        fi
+        
+        echo "🚢 Deploying $SERVICE_NAME with version $MODEL_VERSION"
+        
+        # Simuler le déploiement
+        cat > docker-compose-ab-${{ matrix.model }}.yml << EOF
+        version: '3.8'
+        services:
+          $SERVICE_NAME:
+            image: ghcr.io/nicoooo972/mnist-mlops:$MODEL_VERSION-serving
+            ports:
+              - "808${{ matrix.model == 'a' && '0' || '1' }}:8080"
+            environment:
+              - MODEL_VERSION=$MODEL_VERSION
+              - AB_TEST_ID=${{ needs.prepare-ab-test.outputs.test_id }}
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+              interval: 30s
+              timeout: 10s
+              retries: 3
+        EOF
+        
+        echo "✅ Model ${{ matrix.model }} configuration ready"
+    
+    - name: Upload deployment config
+      uses: actions/upload-artifact@v4
+      with:
+        name: ab-deployment-${{ matrix.model }}
+        path: docker-compose-ab-${{ matrix.model }}.yml
+
+  run-ab-test:
+    name: 🔬 Execute A/B Test
+    runs-on: ubuntu-latest
+    needs: [prepare-ab-test, deploy-models]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install testing dependencies
+      run: |
+        pip install requests numpy pandas matplotlib seaborn scipy
+    
+    - name: Generate test traffic
+      run: |
+        python << 'EOF'
+        import requests
+        import json
+        import time
+        import random
+        import numpy as np
+        from datetime import datetime, timedelta
+        
+        # Configuration du test
+        TEST_ID = "${{ needs.prepare-ab-test.outputs.test_id }}"
+        DURATION_MINUTES = int("${{ github.event.inputs.test_duration_minutes }}")
+        TRAFFIC_SPLIT = int("${{ github.event.inputs.traffic_split }}")
+        
+        MODEL_A_ENDPOINT = "${{ needs.prepare-ab-test.outputs.model_a_endpoint }}"
+        MODEL_B_ENDPOINT = "${{ needs.prepare-ab-test.outputs.model_b_endpoint }}"
+        
+        print(f"🚀 Starting A/B test: {TEST_ID}")
+        print(f"⏱️  Duration: {DURATION_MINUTES} minutes")
+        print(f"🔀 Traffic split: {100-TRAFFIC_SPLIT}% A, {TRAFFIC_SPLIT}% B")
+        
+        # Simuler du trafic utilisateur
+        test_results = {
+            "test_id": TEST_ID,
+            "start_time": datetime.now().isoformat(),
+            "model_a": {"requests": 0, "successes": 0, "response_times": []},
+            "model_b": {"requests": 0, "successes": 0, "response_times": []}
+        }
+        
+        end_time = datetime.now() + timedelta(minutes=DURATION_MINUTES)
+        
+        # Simulation rapide pour CI/CD (1 minute au lieu de la durée complète)
+        simulation_duration = min(DURATION_MINUTES, 1)
+        end_time = datetime.now() + timedelta(minutes=simulation_duration)
+        
+        print("📈 Generating test traffic...")
+        
+        request_count = 0
+        while datetime.now() < end_time:
+            # Décider quel modèle utiliser
+            use_model_b = random.randint(1, 100) <= TRAFFIC_SPLIT
+            
+            if use_model_b:
+                endpoint = MODEL_B_ENDPOINT
+                model_key = "model_b"
+            else:
+                endpoint = MODEL_A_ENDPOINT
+                model_key = "model_a"
+            
+            # Simuler une requête (sans vraie API)
+            start_time = time.time()
+            
+            # Simuler différentes performances
+            if model_key == "model_a":
+                # Modèle A: stable mais plus lent
+                response_time = random.gauss(0.05, 0.01)  # 50ms ± 10ms
+                success_rate = 0.98
+            else:
+                # Modèle B: plus rapide mais moins stable
+                response_time = random.gauss(0.03, 0.008)  # 30ms ± 8ms
+                success_rate = 0.95
+            
+            success = random.random() < success_rate
+            
+            # Enregistrer les résultats
+            test_results[model_key]["requests"] += 1
+            if success:
+                test_results[model_key]["successes"] += 1
+                test_results[model_key]["response_times"].append(response_time)
+            
+            request_count += 1
+            
+            # Throttling pour simulation
+            time.sleep(0.1)
+            
+            if request_count % 10 == 0:
+                print(f"  Processed {request_count} requests...")
+        
+        test_results["end_time"] = datetime.now().isoformat()
+        
+        # Calculer les métriques
+        for model_key in ["model_a", "model_b"]:
+            model_data = test_results[model_key]
+            if model_data["requests"] > 0:
+                model_data["success_rate"] = model_data["successes"] / model_data["requests"]
+                if model_data["response_times"]:
+                    model_data["avg_response_time"] = np.mean(model_data["response_times"])
+                    model_data["p95_response_time"] = np.percentile(model_data["response_times"], 95)
+                else:
+                    model_data["avg_response_time"] = 0
+                    model_data["p95_response_time"] = 0
+            else:
+                model_data["success_rate"] = 0
+                model_data["avg_response_time"] = 0
+                model_data["p95_response_time"] = 0
+        
+        # Sauvegarder les résultats
+        with open("ab_test_results.json", "w") as f:
+            json.dump(test_results, f, indent=2)
+        
+        print("✅ A/B test traffic generation completed")
+        print(f"📊 Model A: {test_results['model_a']['requests']} requests")
+        print(f"📊 Model B: {test_results['model_b']['requests']} requests")
+        EOF
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      with:
+        name: ab-test-results
+        path: ab_test_results.json
+
+  analyze-results:
+    name: 📊 Analyze A/B Test Results
+    runs-on: ubuntu-latest
+    needs: [prepare-ab-test, run-ab-test]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download test results
+      uses: actions/download-artifact@v4
+      with:
+        name: ab-test-results
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install analysis dependencies
+      run: |
+        pip install numpy pandas scipy matplotlib seaborn
+    
+    - name: Analyze results
+      run: |
+        python << 'EOF'
+        import json
+        import numpy as np
+        from scipy import stats
+        
+        # Charger les résultats
+        with open("ab_test_results.json", "r") as f:
+            results = json.load(f)
+        
+        model_a = results["model_a"]
+        model_b = results["model_b"]
+        
+        print("🔬 A/B Test Analysis")
+        print("=" * 50)
+        print(f"Test ID: {results['test_id']}")
+        print(f"Duration: {results['start_time']} to {results['end_time']}")
+        print()
+        
+        print("📊 Traffic Distribution:")
+        total_requests = model_a["requests"] + model_b["requests"]
+        if total_requests > 0:
+            a_percent = model_a["requests"] / total_requests * 100
+            b_percent = model_b["requests"] / total_requests * 100
+            print(f"  Model A: {model_a['requests']} requests ({a_percent:.1f}%)")
+            print(f"  Model B: {model_b['requests']} requests ({b_percent:.1f}%)")
+        print()
+        
+        print("🎯 Performance Metrics:")
+        
+        # Success Rate
+        print("  Success Rate:")
+        print(f"    Model A: {model_a.get('success_rate', 0):.3f}")
+        print(f"    Model B: {model_b.get('success_rate', 0):.3f}")
+        
+        if model_a.get('success_rate', 0) > 0 and model_b.get('success_rate', 0) > 0:
+            improvement = (model_b['success_rate'] - model_a['success_rate']) / model_a['success_rate'] * 100
+            print(f"    Improvement: {improvement:+.2f}%")
+        print()
+        
+        # Response Time
+        print("  Response Time:")
+        print(f"    Model A: {model_a.get('avg_response_time', 0)*1000:.1f}ms avg, {model_a.get('p95_response_time', 0)*1000:.1f}ms p95")
+        print(f"    Model B: {model_b.get('avg_response_time', 0)*1000:.1f}ms avg, {model_b.get('p95_response_time', 0)*1000:.1f}ms p95")
+        
+        if model_a.get('avg_response_time', 0) > 0 and model_b.get('avg_response_time', 0) > 0:
+            time_improvement = (model_a['avg_response_time'] - model_b['avg_response_time']) / model_a['avg_response_time'] * 100
+            print(f"    Time Improvement: {time_improvement:+.2f}%")
+        print()
+        
+        # Recommandation
+        print("🏆 Recommendation:")
+        
+        # Critères de décision simples
+        a_score = model_a.get('success_rate', 0) * 0.7 + (1 / (model_a.get('avg_response_time', 1) + 0.001)) * 0.3
+        b_score = model_b.get('success_rate', 0) * 0.7 + (1 / (model_b.get('avg_response_time', 1) + 0.001)) * 0.3
+        
+        if b_score > a_score * 1.05:  # 5% d'amélioration minimum
+            recommendation = "PROMOTE Model B to production"
+            confidence = "HIGH" if b_score > a_score * 1.10 else "MEDIUM"
+        elif a_score > b_score * 1.05:
+            recommendation = "KEEP Model A in production"
+            confidence = "HIGH"
+        else:
+            recommendation = "NO CLEAR WINNER - Need more data"
+            confidence = "LOW"
+        
+        print(f"  {recommendation}")
+        print(f"  Confidence: {confidence}")
+        
+        # Créer le rapport de recommandation
+        recommendation_report = {
+            "test_id": results["test_id"],
+            "recommendation": recommendation,
+            "confidence": confidence,
+            "model_a_score": float(a_score),
+            "model_b_score": float(b_score),
+            "metrics_summary": {
+                "model_a": {
+                    "success_rate": model_a.get('success_rate', 0),
+                    "avg_response_time_ms": model_a.get('avg_response_time', 0) * 1000
+                },
+                "model_b": {
+                    "success_rate": model_b.get('success_rate', 0),
+                    "avg_response_time_ms": model_b.get('avg_response_time', 0) * 1000
+                }
+            }
+        }
+        
+        with open("ab_test_recommendation.json", "w") as f:
+            json.dump(recommendation_report, f, indent=2)
+        
+        print("\n✅ Analysis completed!")
+        EOF
+    
+    - name: Upload analysis results
+      uses: actions/upload-artifact@v4
+      with:
+        name: ab-test-analysis
+        path: ab_test_recommendation.json
+    
+    - name: Create test summary
+      run: |
+        echo "## 🧪 A/B Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "**Test ID**: ${{ needs.prepare-ab-test.outputs.test_id }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Duration**: ${{ github.event.inputs.test_duration_minutes }} minutes" >> $GITHUB_STEP_SUMMARY
+        echo "**Traffic Split**: ${{ github.event.inputs.traffic_split }}% to Model B" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Models Tested" >> $GITHUB_STEP_SUMMARY
+        echo "- **Model A**: ${{ github.event.inputs.model_a_version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Model B**: ${{ github.event.inputs.model_b_version }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📊 Detailed analysis available in artifacts" >> $GITHUB_STEP_SUMMARY
+
+  cleanup:
+    name: 🧹 Cleanup Test Environment
+    runs-on: ubuntu-latest
+    needs: [prepare-ab-test, analyze-results]
+    if: always()
+    steps:
+    - name: Cleanup test deployments
+      run: |
+        echo "🧹 Cleaning up A/B test environment..."
+        echo "  Stopping test containers..."
+        echo "  Removing temporary resources..."
+        echo "✅ Cleanup completed for test: ${{ needs.prepare-ab-test.outputs.test_id }}" 

@@ -1,0 +1,298 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - "ml_alerts.yml"
+  - "performance_alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ML Model API monitoring
+  - job_name: 'mnist-api'
+    static_configs:
+      - targets: ['mnist-api:8080']
+    metrics_path: /metrics
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # Model training pipeline monitoring
+  - job_name: 'training-pipeline'
+    static_configs:
+      - targets: ['training-worker:8000']
+    metrics_path: /metrics
+    scrape_interval: 30s
+
+  # Node exporter pour les métriques système
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 5s
+
+  # cAdvisor pour les métriques Docker
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 5s
+
+  # Model drift monitoring
+  - job_name: 'model-drift-detector'
+    static_configs:
+      - targets: ['drift-detector:8001']
+    metrics_path: /metrics
+    scrape_interval: 60s
+
+  # A/B testing metrics
+  - job_name: 'ab-testing'
+    static_configs:
+      - targets: ['ab-proxy:8002']
+    metrics_path: /ab-metrics
+    scrape_interval: 10s
+
+  # Data quality monitoring
+  - job_name: 'data-quality'
+    static_configs:
+      - targets: ['data-validator:8003']
+    metrics_path: /data-metrics
+    scrape_interval: 30s
+
+# Remote write configuration for long-term storage
+remote_write:
+  - url: "http://prometheus-remote-storage:19291/api/v1/write"
+    queue_config:
+      max_samples_per_send: 1000
+      max_shards: 200
+      capacity: 2500
+
+# Recording rules for ML metrics
+recording_rules:
+  - name: ml_performance_rules
+    rules:
+      # Model inference rate
+      - record: ml:inference_rate_5m
+        expr: rate(model_inference_total[5m])
+      
+      # Model accuracy (rolling 1h)
+      - record: ml:accuracy_1h
+        expr: rate(model_correct_predictions_total[1h]) / rate(model_total_predictions_total[1h])
+      
+      # Model latency percentiles
+      - record: ml:latency_p95_5m
+        expr: histogram_quantile(0.95, rate(model_inference_duration_bucket[5m]))
+      
+      - record: ml:latency_p99_5m
+        expr: histogram_quantile(0.99, rate(model_inference_duration_bucket[5m]))
+      
+      # Error rate
+      - record: ml:error_rate_5m
+        expr: rate(model_errors_total[5m]) / rate(model_requests_total[5m])
+      
+      # Data drift score (rolling 24h)
+      - record: ml:drift_score_24h
+        expr: avg_over_time(data_drift_score[24h])
+      
+      # Model memory usage
+      - record: ml:memory_usage_avg_5m
+        expr: avg_over_time(model_memory_bytes[5m])
+      
+      # Training pipeline success rate
+      - record: ml:training_success_rate_24h
+        expr: rate(training_jobs_successful_total[24h]) / rate(training_jobs_total[24h])
+
+  - name: business_metrics_rules
+    rules:
+      # Predictions per minute by model version
+      - record: business:predictions_per_minute
+        expr: rate(model_predictions_total[1m]) * 60
+        labels:
+          aggregation: "per_minute"
+      
+      # Model confidence distribution
+      - record: business:high_confidence_predictions_rate
+        expr: rate(model_high_confidence_predictions_total[5m])
+      
+      # A/B test conversion metrics
+      - record: business:ab_conversion_rate
+        expr: rate(ab_test_conversions_total[1h]) / rate(ab_test_impressions_total[1h])
+
+# Alerting rules
+alerting_rules:
+  - name: ml_critical_alerts
+    rules:
+      # Model accuracy drop
+      - alert: ModelAccuracyDrop
+        expr: ml:accuracy_1h < 0.85
+        for: 5m
+        labels:
+          severity: critical
+          team: ml-ops
+        annotations:
+          summary: "Model accuracy has dropped significantly"
+          description: "Model accuracy is {{ $value | humanizePercentage }} (threshold: 85%)"
+      
+      # High error rate
+      - alert: HighModelErrorRate
+        expr: ml:error_rate_5m > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          team: ml-ops
+        annotations:
+          summary: "High model error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+      
+      # High latency
+      - alert: HighModelLatency
+        expr: ml:latency_p95_5m > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          team: ml-ops
+        annotations:
+          summary: "Model latency is high"
+          description: "P95 latency is {{ $value }}s (threshold: 0.5s)"
+      
+      # Data drift detected
+      - alert: DataDriftDetected
+        expr: ml:drift_score_24h > 0.3
+        for: 10m
+        labels:
+          severity: warning
+          team: data-science
+        annotations:
+          summary: "Data drift detected"
+          description: "Drift score is {{ $value }} (threshold: 0.3)"
+      
+      # Model memory usage high
+      - alert: HighModelMemoryUsage
+        expr: ml:memory_usage_avg_5m > 2e9  # 2GB
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Model memory usage is high"
+          description: "Memory usage is {{ $value | humanizeBytes }} (threshold: 2GB)"
+      
+      # Training pipeline failures
+      - alert: TrainingPipelineFailures
+        expr: ml:training_success_rate_24h < 0.8
+        for: 0m
+        labels:
+          severity: critical
+          team: ml-ops
+        annotations:
+          summary: "Training pipeline success rate is low"
+          description: "Success rate is {{ $value | humanizePercentage }} (threshold: 80%)"
+
+  - name: ml_service_alerts
+    rules:
+      # Service down
+      - alert: ModelServiceDown
+        expr: up{job="mnist-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "Model service is down"
+          description: "Model API service has been down for more than 1 minute"
+      
+      # Low request rate (possible issue)
+      - alert: LowRequestRate
+        expr: ml:inference_rate_5m < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          team: business
+        annotations:
+          summary: "Unusually low request rate"
+          description: "Request rate is {{ $value }} req/s (expected > 0.1 req/s)"
+
+# Custom ML metrics definitions
+custom_metrics:
+  model_performance:
+    - name: model_inference_total
+      help: Total number of model inferences
+      type: counter
+      labels: [model_version, endpoint]
+    
+    - name: model_inference_duration
+      help: Model inference duration in seconds
+      type: histogram
+      buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+      labels: [model_version, endpoint]
+    
+    - name: model_accuracy_score
+      help: Current model accuracy score
+      type: gauge
+      labels: [model_version, dataset]
+    
+    - name: model_confidence_score
+      help: Model prediction confidence score
+      type: histogram
+      buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
+      labels: [model_version, prediction_class]
+
+  data_quality:
+    - name: data_drift_score
+      help: Data drift detection score
+      type: gauge
+      labels: [feature_name, drift_method]
+    
+    - name: data_validation_errors
+      help: Number of data validation errors
+      type: counter
+      labels: [validation_rule, severity]
+    
+    - name: feature_importance_change
+      help: Change in feature importance scores
+      type: gauge
+      labels: [feature_name, model_version]
+
+  training_pipeline:
+    - name: training_duration_seconds
+      help: Training job duration in seconds
+      type: histogram
+      buckets: [60, 300, 600, 1800, 3600, 7200, 14400]
+      labels: [job_id, model_type]
+    
+    - name: model_size_bytes
+      help: Model file size in bytes
+      type: gauge
+      labels: [model_version, model_type]
+    
+    - name: training_loss
+      help: Training loss value
+      type: gauge
+      labels: [model_version, epoch]
+
+  ab_testing:
+    - name: ab_test_requests_total
+      help: Total A/B test requests
+      type: counter
+      labels: [test_id, variant, endpoint]
+    
+    - name: ab_test_conversion_rate
+      help: A/B test conversion rate
+      type: gauge
+      labels: [test_id, variant]
+    
+    - name: ab_test_response_time
+      help: A/B test response time
+      type: histogram
+      buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0]
+      labels: [test_id, variant] 
