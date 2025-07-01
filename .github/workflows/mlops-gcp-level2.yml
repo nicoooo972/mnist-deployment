@@ -155,6 +155,7 @@ jobs:
       run: |
         gcloud run deploy ${SERVICE_NAME} \
           --image=gcr.io/$PROJECT_ID/mnist-api:latest \
+          --project=${{ env.PROJECT_ID }} \
           --region=$REGION \
           --platform=managed \
           --allow-unauthenticated
