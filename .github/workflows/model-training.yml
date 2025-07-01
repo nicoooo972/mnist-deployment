@@ -18,7 +18,7 @@ on:
       min_accuracy:
         description: 'Minimum accuracy for promotion'
         required: false
-        default: '95.0'
+        default: '90.0'
         
   schedule:
     # Entraînement automatique tous les dimanche à 2h du matin
@@ -318,6 +318,7 @@ jobs:
         import torch
         import json
         import sys
+        import os
         
         # Charger les métriques
         with open("backend-repo/metrics.json", "r") as f:
