@@ -81,11 +81,13 @@ jobs:
             assert 0 <= sample_y <= 9, f"Wrong label range: {sample_y}"
             
             print("✅ Data validation passed")
-                         print("valid=true", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write("valid=true\n")
             
         except Exception as e:
             print(f"❌ Data validation failed: {e}")
-                         print("valid=false", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write("valid=false\n")
             exit(1)
         EOF
 
@@ -252,10 +254,10 @@ jobs:
                 "version": "${{ steps.version.outputs.version }}"
             }, f)
             
-                 # Set outputs
-         with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-             f.write(f"accuracy={accuracy}\n")
-             f.write(f"loss={test_loss}\n")
+        # Set outputs
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"accuracy={accuracy}\n")
+            f.write(f"loss={test_loss}\n")
         EOF
         
     - name: Upload model artifacts
@@ -353,15 +355,15 @@ jobs:
             status = "✅" if passed else "❌"
             print(f"   {status} {check}: {passed}")
         
-                 if all_passed:
-             print(f"\n🎉 Model validation PASSED - Ready for promotion!")
-             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                 f.write("ready=true\n")
-         else:
-             print(f"\n⚠️  Model validation FAILED - Not ready for promotion")
-             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                 f.write("ready=false\n")
-            
+        if all_passed:
+            print(f"\n🎉 Model validation PASSED - Ready for promotion!")
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write("ready=true\n")
+        else:
+            print(f"\n⚠️  Model validation FAILED - Not ready for promotion")
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write("ready=false\n")
+        
         # Sauvegarder le rapport de validation
         with open("validation_report.json", "w") as f:
             json.dump({
