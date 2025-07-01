@@ -366,10 +366,12 @@ jobs:
         
         if all_passed:
             print(f"\n🎉 Model validation PASSED - Ready for promotion!")
+            print(f"DEBUG: Setting promotion_ready=true")
             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
                 f.write("ready=true\n")
         else:
             print(f"\n⚠️  Model validation FAILED - Not ready for promotion")
+            print(f"DEBUG: Setting promotion_ready=false")
             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
                 f.write("ready=false\n")
         
@@ -389,6 +391,29 @@ jobs:
         name: validation-report-${{ needs.model-training.outputs.model_version }}
         path: validation_report.json
 
+  debug-outputs:
+    name: 🐛 Debug Outputs
+    runs-on: ubuntu-latest
+    needs: [model-training, model-validation]
+    if: always()
+    steps:
+    - name: Show all outputs
+      run: |
+        echo "🔍 DEBUG: All job outputs and results..."
+        echo "=== MODEL TRAINING ==="
+        echo "Result: ${{ needs.model-training.result }}"
+        echo "Version: ${{ needs.model-training.outputs.model_version }}"
+        echo "Accuracy: ${{ needs.model-training.outputs.accuracy }}"
+        echo "Loss: ${{ needs.model-training.outputs.loss }}"
+        echo ""
+        echo "=== MODEL VALIDATION ==="
+        echo "Result: ${{ needs.model-validation.result }}"
+        echo "Promotion ready: '${{ needs.model-validation.outputs.promotion_ready }}'"
+        echo "Type: ${{ type(needs.model-validation.outputs.promotion_ready) }}"
+        echo "Length: ${{ length(needs.model-validation.outputs.promotion_ready) }}"
+        echo "Equals 'true': ${{ needs.model-validation.outputs.promotion_ready == 'true' }}"
+        echo "Contains true: ${{ contains(needs.model-validation.outputs.promotion_ready, 'true') }}"
+
   model-promotion:
     name: 🏆 Model Promotion
     runs-on: ubuntu-latest
@@ -396,6 +421,13 @@ jobs:
     if: needs.model-validation.outputs.promotion_ready == 'true'
     # environment: production  # Commenté pour test
     steps:
+    - name: Debug promotion condition
+      run: |
+        echo "🔍 DEBUG: Checking promotion conditions..."
+        echo "model-validation result: ${{ needs.model-validation.result }}"
+        echo "promotion_ready output: '${{ needs.model-validation.outputs.promotion_ready }}'"
+        echo "promotion_ready == 'true': ${{ needs.model-validation.outputs.promotion_ready == 'true' }}"
+        
     - uses: actions/checkout@v4
       with:
         repository: nicoooo972/mnist-backend
@@ -458,7 +490,7 @@ jobs:
   notify:
     name: 📢 Notification
     runs-on: ubuntu-latest
-    needs: [model-training, model-validation, model-promotion]
+    needs: [model-training, model-validation, debug-outputs, model-promotion]
     if: always()
     steps:
     - name: Training completed notification
