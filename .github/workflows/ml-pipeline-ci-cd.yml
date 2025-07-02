@@ -295,3 +295,28 @@ jobs:
         else
           echo "❌ Deployment failed"
         fi 
+
+  deploy-to-vertex-ai:
+    name: "🚀 Deploy to Vertex AI"
+    runs-on: ubuntu-latest
+    needs: build-containers
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: "Checkout repository"
+        uses: "actions/checkout@v4"
+
+      - name: "Authenticate to Google Cloud"
+        uses: "google-github-actions/auth@v2"
+        with:
+          credentials_json: "${{ secrets.GCP_SA_KEY }}"
+
+      - name: "Set up Cloud SDK"
+        uses: "google-github-actions/setup-gcloud@v2"
+
+      - name: "Deploy Vertex AI Custom Job"
+        run: |
+          gcloud ai custom-jobs create \
+            --region=europe-west1 \
+            --display-name=mnist-training-$(date +%Y%m%d_%H%M%S) \
+            --worker-pool-spec=machine-type=n1-standard-4,replica-count=1,container-image-uri=${{ needs.build-containers.outputs.image-tag }} \
+            --project=${{ secrets.GCP_PROJECT_ID }}
