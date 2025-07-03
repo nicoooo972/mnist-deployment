@@ -36,3 +36,4 @@ parent-directory/
 └── mnist-deployment/  # Ce repo (orchestration)
 ```
 # Pipeline relaunch
+# Trigger pipeline after Pylint fixes
