@@ -1,0 +1,109 @@
+name: 'MLOps GCP - Deploy Serving API'
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mnist-deployment/backend/**'
+      - 'mnist-deployment/Dockerfile.serving'
+      - '.github/workflows/mlops-gcp-level2.yml'
+
+jobs:
+  build-serving-image:
+    name: 'Build Serving Image'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    outputs:
+      image_uri: ${{ steps.build.outputs.image_uri }}
+
+    steps:
+    - name: 'Checkout'
+      uses: 'actions/checkout@v4'
+
+    - name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v2'
+      with:
+        workload_identity_provider: 'projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ secrets.WIF_POOL_ID }}/providers/${{ secrets.WIF_PROVIDER_ID }}'
+        service_account: '${{ secrets.GCP_SERVICE_ACCOUNT }}'
+
+    - name: 'Set up Cloud SDK'
+      uses: 'google-github-actions/setup-gcloud@v2'
+
+    - name: 'Enable GCP Services'
+      run: |
+        gcloud services enable artifactregistry.googleapis.com
+        gcloud services enable cloudbuild.googleapis.com
+
+    - name: 'Build and Push Serving Image'
+      id: build
+      run: |
+        IMAGE_URI="europe-west1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/mnist-repo/mnist-serving:${{ github.sha }}"
+        gcloud builds submit \
+          --tag $IMAGE_URI \
+          --file Dockerfile.serving .
+        echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+      working-directory: mnist-deployment
+
+  deploy-to-vertex-ai:
+    name: 'Deploy to Vertex AI Endpoint'
+    runs-on: ubuntu-latest
+    needs: build-serving-image
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: 'Checkout'
+      uses: 'actions/checkout@v4'
+
+    - name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v2'
+      with:
+        workload_identity_provider: 'projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ secrets.WIF_POOL_ID }}/providers/${{ secrets.WIF_PROVIDER_ID }}'
+        service_account: '${{ secrets.GCP_SERVICE_ACCOUNT }}'
+
+    - name: 'Set up Cloud SDK'
+      uses: 'google-github-actions/setup-gcloud@v2'
+      
+    - name: 'Enable Vertex AI Service'
+      run: gcloud services enable aiplatform.googleapis.com
+
+    - name: 'Deploy to Vertex AI Endpoint'
+      id: deploy
+      run: |
+        IMAGE_URI="${{ needs.build-serving-image.outputs.image_uri }}"
+
+        # Upload the model with the serving container
+        MODEL_ID=$(gcloud ai models upload \
+          --region=europe-west1 \
+          --display-name="mnist-serving-model-${{ github.sha }}" \
+          --serving-container-image-uri="$IMAGE_URI" \
+          --serving-container-predict-route="/predict" \
+          --serving-container-health-route="/health" \
+          --serving-container-port="8000" \
+          --format="value(model)")
+
+        # Check if an endpoint exists, create if not
+        ENDPOINT_ID=$(gcloud ai endpoints list --region=europe-west1 --filter="displayName=mnist-endpoint" --format="value(name)")
+        if [ -z "$ENDPOINT_ID" ]; then
+          echo "Creating new Vertex AI Endpoint..."
+          ENDPOINT_ID=$(gcloud ai endpoints create \
+            --region=europe-west1 \
+            --display-name="mnist-endpoint" \
+            --format="value(name)")
+        else
+          echo "Using existing Vertex AI Endpoint: $ENDPOINT_ID"
+        fi
+
+        # Deploy the model to the endpoint with 100% traffic
+        gcloud ai endpoints deploy-model $ENDPOINT_ID \
+          --region=europe-west1 \
+          --model=$MODEL_ID \
+          --display-name="mnist-serving-deployment-${{ github.sha }}" \
+          --machine-type="n1-standard-2" \
+          --min-replica-count=1 \
+          --max-replica-count=2 \
+          --traffic-split="0=100" 
