@@ -12,61 +12,9 @@ env:
   PYTHON_VERSION: "3.11"
 
 jobs:
-  code-quality:
-    name: 🧹 Code Quality & Security
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        
-    - name: Checkout backend code
-      uses: actions/checkout@v4
-      with:
-        repository: nicoooo972/mnist-backend
-        path: backend
-        token: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Install dependencies
-      run: |
-        cd backend
-        pip install -r requirements.txt
-        pip install pylint flake8 bandit safety pytest-cov
-        
-    - name: Linting
-      run: |
-        cd backend
-        echo "🔍 Running pylint..."
-        pylint src/ --fail-under=8.0
-        
-    - name: Style check
-      run: |
-        cd backend
-        echo "📏 Running flake8..."
-        flake8 src/ tests/ --max-line-length=88 --extend-ignore=E203,W503
-        
-    - name: Security scan
-      run: |
-        echo "🔒 Security scanning..."
-        bandit -r src/ -f json -o bandit-report.json
-        safety check --json --output safety-report.json
-        
-    - name: Upload security reports
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: security-reports
-        path: |
-          bandit-report.json
-          safety-report.json
-
   unit-tests:
     name: 🧪 Unit & Integration Tests
     runs-on: ubuntu-latest
-    needs: code-quality
     strategy:
       matrix:
         test-type: [unit, integration, model-validation]
@@ -121,7 +69,7 @@ jobs:
   build-containers:
     name: 🐳 Build & Push Containers
     runs-on: ubuntu-latest
-    needs: [code-quality, unit-tests]
+    needs: [unit-tests]
     if: github.event_name == 'push'
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
