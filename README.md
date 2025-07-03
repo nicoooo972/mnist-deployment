@@ -35,3 +35,4 @@ parent-directory/
 ├── mnist-frontend/    # Repo du frontend Streamlit  
 └── mnist-deployment/  # Ce repo (orchestration)
 ```
+# Pipeline relaunch
