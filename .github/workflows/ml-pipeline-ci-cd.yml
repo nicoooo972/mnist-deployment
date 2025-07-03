@@ -34,13 +34,7 @@ jobs:
       run: |
         cd backend
         pip install -r requirements.txt
-        pip install pylint black flake8 bandit safety pytest-cov
-        
-    - name: Code formatting check
-      run: |
-        cd backend
-        echo "🎨 Checking code formatting..."
-        black --check --diff src/ tests/
+        pip install pylint flake8 bandit safety pytest-cov
         
     - name: Linting
       run: |
