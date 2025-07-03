@@ -3,19 +3,8 @@ name: 🔄 ML Pipeline CI/CD
 on:
   push:
     branches: [main, develop]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'requirements.txt'
-      - 'Dockerfile*'
-      - 'docker-compose*.yml'
   pull_request:
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'requirements.txt'
-      - 'Dockerfile*'
 
 env:
   REGISTRY: ghcr.io
