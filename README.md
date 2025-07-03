@@ -8,7 +8,6 @@ Ce repo coordonne le déploiement de :
 
 - **Backend** : API FastAPI avec modèle PyTorch
 - **Frontend** : Interface Streamlit
-- **Monitoring** : Prometheus + Grafana
 - **CI/CD** : Pipelines GitHub Actions automatisés
 
 ## 🏗️ Architecture
@@ -19,7 +18,7 @@ Ce repo coordonne le déploiement de :
 │                 │    │                 │    │                 │
 │ • FastAPI       │    │ • Streamlit     │    │ • Docker Compose│
 │ • PyTorch       │◄──►│ • Interface UI  │◄──►│ • CI/CD         │
-│ • Model MNIST   │    │ • Drawing Canvas│    │ • Monitoring    │
+│ • Model MNIST   │    │ • Drawing Canvas│    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
@@ -85,8 +84,6 @@ curl -X POST -H "Content-Type: application/json" \
 
 - **Application** : http://localhost:8501
 - **API Backend** : http://localhost:8000/docs
-- **Prometheus** : http://localhost:9090
-- **Grafana** : http://localhost:3000 (admin/admin)
 
 ### Métriques surveillées
 
@@ -137,9 +134,6 @@ GHCR_TOKEN=<github_token>
 # Environnements
 STAGING_HOST=<staging_server>
 PRODUCTION_HOST=<production_server>
-
-# Monitoring
-GRAFANA_PASSWORD=<secure_password>
 
 # Notifications
 SLACK_WEBHOOK=<webhook_url>
@@ -290,15 +284,6 @@ docker compose logs mnist-frontend
 make status
 ```
 
-### Escalation
-
-1. Vérifier logs applicatifs
-2. Consulter monitoring Grafana
-3. Analyser métriques Prometheus
-4. Contacter l'équipe DevOps
-
----
-
 ## 🎯 Prochaines étapes
 
 ### Améliorations prévues
@@ -332,7 +317,7 @@ Ce dépôt est le pivot qui assure notre maturité MLOps de **niveau 2**, en orc
 
 Ce n'est pas juste un conteneur, mais un écosystème de services. Les fichiers `docker-compose.*.yml` agissent comme le chef d'orchestre :
 
-- Ils définissent comment les services (`mnist-backend`, `mnist-frontend`, `prometheus`, `grafana`) communiquent et coexistent.
+- Ils définissent comment les services (`mnist-backend`, `mnist-frontend`) communiquent et coexistent.
 - Ils gèrent les configurations spécifiques à chaque environnement (`dev`, `staging`, `prod`), garantissant que le comportement en local reflète fidèlement celui de la production.
 
 ### 2. ⚙️ Infrastructure as Code (IaC)
